@@ -44,8 +44,31 @@ sys.path.insert(1, os.path.join(os.path.dirname(__file__), '/opt/victronenergy/d
 from vedbus import VeDbusService, VeDbusItemExport, VeDbusItemImport 
 from settingsdevice import SettingsDevice  # available in the velib_python repository
 
+SensorPowerPin = 27
 SCount = 0
 dbusservice = None
+
+def checkSensorPowerState():
+    value = 0
+    f = open("/sys/class/gpio/gpio"+str(SensorPowerPin)+"/value", "r+")
+    v = int(f.read())
+    if v != 1:
+        # Power on the sensors
+        logging.info("Power on the sensors on GPIO "+str(SensorPowerPin))
+        f.write("1")
+        f.flush()
+        os.fsync(f.fileno())
+        return True
+    f.close()
+    return False
+    
+def toggleSensorPowerState():
+    logging.info("Power down the sensors on GPIO "+str(SensorPowerPin))
+    f = open("/sys/class/gpio/gpio"+str(SensorPowerPin)+"/value", "r+")
+    f.write("0")
+    f.flush()
+    os.fsync(f.fileno())
+    f.close()
 
 def update():
 # Calls to update ADC and I2C interfaces have been commented out
@@ -150,7 +173,11 @@ def update_rpi():
 #update W1 temp
 def update_W1():
 #check, create and update 1 Wire devices
+    if checkSensorPowerState():
+        return
 
+    foundSensors = False
+    
     #read list of slaves
     if os.path.isfile('/sys/devices/w1_bus_master1/w1_master_slaves'):
         fd = open('/sys/devices/w1_bus_master1/w1_master_slaves','r')
@@ -165,6 +192,7 @@ def update_W1():
             
             #DS18B20 Temp Sensors
             if familyID == '28':
+                foundSensors = True
                 if ('W1-temp:'+ id) not in dbusservice:
                     logging.info("1Wire Sensor found with no Service -> Create:")
                                     
@@ -190,6 +218,10 @@ def update_W1():
                     
                 dbusservice['W1-temp:'+ id]['/Temperature'] = value
 
+    # Power cycle the sensors...
+    if not foundSensors:
+        toggleSensorPowerState()
+    
     #Check 1 Wire Service Connection
     for item in dbusservice:
         logging.debug("Search for 1Wire Service Current Service: " + item)
@@ -401,9 +433,9 @@ base = 'com.victronenergy'
     #dbusservice['cpu-temp']['/ProductName'] = 'Raspberry Pi'
 
 # Persistent settings obejects in settingsDevice will not exist before this is executed
-initSettings(newSettings)
+# initSettings(newSettings)
 # Do something to read the saved settings and apply them to the objects
-readSettings(settingObjects)
+# readSettings(settingObjects)
 
 # Do a first update so that all the readings appear.
 update()
